@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+from collections import OrderedDict
 
 import sys
 sys.path.append(r'E:\phd-proj\dth\pymdp\pymdp')
@@ -15,7 +16,8 @@ class Spider:
     def __init__(self, start_position, web_state=0):
         self.position = start_position  # The spider's current position
         self.web_state = web_state  # The spider's web state
-    
+        self.trace = [start_position]  # The trace of the spider's route
+
     @property
     def position(self):
         return self._position
@@ -25,15 +27,9 @@ class Spider:
         assert isinstance(value, tuple) and len(value) == 2, "Position must be a tuple of length 2"
         self._position = value
 
-    def get_position(self):
-        # Return the position as a tuple (x, y)
-        return self.position
-
     def move(self, action, web):
-        # Update the spider's position and web state based on the action
-        x_action, y_action, web_action = action  # Separate the action into x, y, and web components
+        x_action, y_action, web_action = action
 
-        # Calculate new position
         new_position = list(self.position)
         if x_action == 0 and self.position[1] > 0:  # Move left
             new_position[1] -= 1
@@ -44,19 +40,17 @@ class Spider:
         elif y_action == 1 and self.position[0] < grid_size - 1:  # Move down
             new_position[0] += 1
 
-        # Check if new position is a valid cell in the web
+        # Check if the new position is part of the web layout
         if tuple(new_position) in web.cells:
+            # Update the spider's position
             self.position = tuple(new_position)
+            self.trace.append(self.position)  # Add the new position to the trace
 
-        # Update web state
-        if web_action == 1:  # Spin web
+        # If the spider is spinning a web and it's not already on a web cell, set the web state to 1
+        if web_action == 1 and self.position not in web.cells:
             self.web_state = 1
         else:  # Stop spinning web
             self.web_state = 0
-
-        # If the spider is spinning a web, add its current position to the web's cells
-        if self.web_state == 1:
-            web.update_state(self.position, grid_size)
 
 class Web:
     def __init__(self, center):
@@ -64,55 +58,44 @@ class Web:
         self.cells = []  # The cells that are part of the web
 
     def initialize_web_layout(self, grid_size):
-        # Build the web in a radial style with 2 levels of depth
-        for dx in range(-2, 3):  # dx is the change in x-coordinate
-            for dy in range(-2, 3):  # dy is the change in y-coordinate
-                # Calculate the distance from the center
-                distance = abs(dx) + abs(dy)
-                # If the distance is less than or equal to 2, add the cell to the web
-                if distance <= 2:
-                    x = self.center[0] + dx
-                    y = self.center[1] + dy
-                    # Check if the cell is within the grid boundaries
-                    if 0 <= x < grid_size and 0 <= y < grid_size:
-                        self.cells.append((x, y))
-        # Remove duplicates
-        self.cells = list(set(self.cells))
+            # Build the web in a circular style with radius 2
+            for dx in range(-2, 3):  # dx is the change in x-coordinate
+                for dy in range(-2, 3):  # dy is the change in y-coordinate
+                    if dx**2 + dy**2 <= 4:  # Check if the cell is within a distance of 2 from the center
+                        x = self.center[0] + dx
+                        y = self.center[1] + dy
+                        if 0 <= x < grid_size and 0 <= y < grid_size:
+                            self.cells.append((x, y))  # Add the cell to the web layout
+
+            self.cells = list(set(self.cells))  # Remove duplicates
 
     def update_state(self, new_cell, grid_size):
         # Check if the new cell is within the grid boundaries
         if 0 <= new_cell[0] < grid_size and 0 <= new_cell[1] < grid_size:
-            # Add the new cell to the web
-            self.cells.append(new_cell)
-            # Remove duplicates
-            self.cells = list(set(self.cells))
+            self.cells.append(new_cell)             # Add the new cell to the web
+            self.cells = list(set(self.cells))      # Remove duplicates
 
 class Environment:
     def __init__(self, grid_size):
-        self.grid_size = grid_size  # The size of the grid in the environment
-        self.spiders = []  # The spiders in the environment
-        self.webs = []  # The webs in the environment
+        self.grid_size = grid_size      # The size of the grid in the environment
+        self.spiders = []               # The spiders in the environment
+        self.webs = []                  # The webs in the environment
 
     def add_spider(self, spider):
-        # Add a spider to the environment
+        # Add a spider to the grid
         self.spiders.append(spider)
 
     def add_web(self, web):
-        # Add a web to the environment
+        # Add a web to the grid
         self.webs.append(web)
 
     def observe(self):
-        # Get the current position of the spider
-        spider_position = self.spiders[0].get_position()
-
-        # Get the current web state of the spider
-        spider_web_state = self.spiders[0].web_state
+        # Returns the current position and web state of the spider as an observation.
+        spider_position = self.spiders[0].position       # Get the current position of the spider
+        spider_web_state = self.spiders[0].web_state           # Get the current web state of the spider
 
         # Convert the observations into integer indices
         observation = [spider_position[0], spider_position[1], spider_web_state]
-
-        # Print the observation for debugging
-        print(f"Observation: {observation}")
 
         return observation
 
@@ -128,68 +111,62 @@ class Environment:
         if not self.is_valid_action(action):
             raise ValueError("Invalid action")
 
-        # Update the position of the spider and the state of the web based on the action
+        # Move the spider based on the action
         self.spiders[0].move(action, self.webs[0])
 
-        # If the spider is spinning a web, add its current position to the web's cells
-        if self.spiders[0].web_state == 1:
-            self.webs[0].update_state(self.spiders[0].position, self.grid_size)
-
-        # If the spider is on a cell that is part of the web, update the spider's web state
+        # Update the spider's web state based on its position
         if self.spiders[0].position in self.webs[0].cells:
-            self.spiders[0].web_state = 1
-        else:
-            self.spiders[0].web_state = 0
-
+            self.spiders[0].web_state = 1  # Set web state to 1 if spider is on a cell that is part of the web
+    
     def visualize(self):
-        # Create a figure and axes
-        fig, ax = plt.subplots()
+        # Create a grid to represent the environment
+        grid = np.zeros((self.grid_size, self.grid_size))
 
-        # Draw grid lines
-        ax.set_xticks(np.arange(0, self.grid_size, 1))
-        ax.set_yticks(np.arange(0, self.grid_size, 1))
-        ax.grid(True)
+        # Mark the cells that are part of the web
+        for cell in self.webs[0].cells:
+            grid[cell] = 2 if cell in self.spiders[0].trace else 1
 
-        # Set the limits of the plot to the size of the grid
-        ax.set_xlim(0, self.grid_size)
-        ax.set_ylim(0, self.grid_size)
+            # Mark the current position of the spider
+            grid[self.spiders[0].position] = 3
 
-        # Plot the spiders
-        for spider in self.spiders:
-            ax.plot(spider.position[1], spider.position[0], 'bo', markersize=10)  # 'bo' means blue circle
-
-        # Plot the webs
-        for web in self.webs:
-            for cell in web.cells:
-                ax.plot(cell[1], cell[0], 'rx')  # 'rx' means red cross
-
-        # Show the plot
-        plt.show()
+            # Plot the grid
+            plt.imshow(grid, cmap='viridis')
+            plt.draw()
 
 class ActiveInferenceModel:
-    def __init__(self):
+    def __init__(self, web, spider):
+        self.web = web
+        self.spider = spider
         # Define the number of states for each factor
         self.num_states = num_states  # [number of x-coordinates (0-9), number of y-coordinates (0-9), web state (web, no web)]
-
         # Define the number of controls for each factor
         self.num_controls = num_controls  # [number of x-movements (move left, move right, stay), number of y-movements (move up, move down, stay), web-spinning action (spin web, don't spin web)]
-
         # Define the number of factors
         self.num_factors = num_factors  # [x-coordinate, y-coordinate, web state]
+    
+    def update_spider_position(self, action):
+        self.spider.move(action, self.web)
 
     def create_A(self, num_states):
+        # Constructs the 'A' matrix, representing the spider's high-fidelity proprioceptive sensory observations about grid position and web state - 1 modality.
+
+        # Calculate the total number of observations: 10 * 10 * 2 = 200
+        total_num_obs = np.prod(num_states)
+
         # Initialize the A matrix (observation likelihoods)
-        A = utils.initialize_empty_A(num_obs, num_states)
+        A = utils.initialize_empty_A([total_num_obs], num_states)
+        A[0] = np.zeros([total_num_obs] + num_states)
 
-        # The spider observes its x-coordinate and y-coordinate with perfect accuracy
-        A[0] = np.eye(num_states[0])  # x-coordinate
-        A[1] = np.eye(num_states[1])  # y-coordinate
-
-        # The spider observes its web state with some error
-        A[2] = np.array([
-            [0.9, 0.1],  # If the true state is 0 (not on a web), the spider observes 0 with probability 0.9 and 1 with probability 0.1
-            [0.1, 0.9]   # If the true state is 1 (on a web), the spider observes 1 with probability 0.9 and 0 with probability 0.1
-        ])
+        # Loop over the Y coordinates
+        for y in range(num_states[1]):
+            # Loop over the X coordinates
+            for x in range(num_states[0]):
+                # Loop over the web presence (0 for no web, 1 for web)
+                for w in range(num_states[2]):
+                    # Calculate the index into the observation array
+                    obs_index = (y * num_states[0] + x) * num_states[2] + w
+                    # Fill out the mapping to observations for the possible settings of X, Y, and W
+                    A[0][obs_index, x, y, w] = 1
 
         return A
 
@@ -225,36 +202,65 @@ class ActiveInferenceModel:
         
         return B
 
-    def create_C(self, num_obs):
-        # Initialize the C matrix (preferences)
-        C = utils.obj_array_zeros(num_obs)
+    def create_C(self, num_states):
+        total_num_obs = np.prod(num_states)  # Total number of observations = 10*10*2 = 200
+        current_position = self.spider.position
 
-        # The spider prefers to be on a web and in the center of the grid
-        C[0][5] = 1.0  # Preference for x = 5
-        C[1][5] = 1.0  # Preference for y = 5
-        C[2][1] = 1.0  # Preference for web state = 1 (on a web)
+        # Initialize the C matrix (preferences)
+        C = utils.obj_array_zeros([total_num_obs])
+
+        # The spider prefers to be on a cell that is part of the web layout and does not have a web
+        for x in range(num_states[0]):
+            for y in range(num_states[1]):
+                for w in range(num_states[2]):
+                    # Calculate the index into the observation array
+                    obs_index = (y * num_states[0] + x) * num_states[2] + w
+                    if (x, y) in self.web.cells:
+                        if w == 0:
+                            C[0][obs_index] = 2.0  # Preference for being on a cell that is part of the web layout and does not have a web
+                        else:
+                            C[0][obs_index] = 0.1  # Lower preference for staying in a position where a web has already been spun
+                    else:
+                        C[0][obs_index] = 0.0  # No preference for cells that are not part of the web layout
+
+                    # Distance-based preference
+                    distance = abs(x - current_position[0]) + abs(y - current_position[1])
+                    C[0][obs_index] += distance / (num_states[0] + num_states[1])
+
+                    # Time-based preference
+                    C[0][obs_index] -= self.spider.trace.count((x, y, w)) / total_num_obs
+
+                    # Randomness
+                    C[0][obs_index] += np.random.normal(0, 0.1)
 
         return C
 
     def create_D(self, num_states):
-        # Initialize the D matrix (prior beliefs)
-        D = [np.zeros(n) for n in num_states]
+        num_factors = len(num_states)
+        # Initialize D with an object array of size num_factors
+        D = utils.obj_array(num_factors)
 
-        # The spider initially believes it's not on a web and in the center of the grid
-        D[0][5] = 1.0  # Initial belief for x = 5
-        D[1][5] = 1.0  # Initial belief for y = 5
-        D[2][0] = 1.0  # Initial belief for web state = 0 (not on a web)
+        # Initialize D[0] and D[1]
+        for i in range(2):
+            D[i] = np.full(num_states[i], 0.1)  # Initialize with 0.1 for all states
+            D[i][5] = 0.5  # Modest prior for the center cell
+            D[i] = D[i] / D[i].sum()  # Normalize D[i]
 
-        return np.array(D, dtype=object)
+        # Initialize D[2]
+        D[2] = np.full(num_states[2], 0.5)  # No preference for the web state
+        D[2] = D[2] / D[2].sum()  # Normalize D[2]
+
+        print(f"D length: {len(D)}")  # Print the length of D
+        print(f"D shapes: {[d.shape for d in D]}")  # Print the shapes of the arrays in D
+        return D
     
     def create_agent(self):
         A = self.create_A(num_states)
         B = self.create_B(num_states, num_controls)
-        C = self.create_C(num_obs)
-        D = self.create_D(num_states)
-
+        C = self.create_C(num_states)
+        D = self.create_D(num_states) 
         return Agent(A=A, B=B, C=C, D=D)
-
+    
 # Define the size of the grid. This is how we define the size of the environment.
 grid_size = 10
 
@@ -268,48 +274,54 @@ num_controls_factors = len(num_controls)  # The number of control factors in the
 
 # Define the number of possible observations for each observation modality
 num_obs = [num_states[0], num_states[1], num_states[2]]  # 10 observations for x, 10 for y, 2 for web
+
+# Initialize the spider and the web
+spider = Spider(start_position=(5, 5))
+web = Web(center=(5, 5))
+web.initialize_web_layout(grid_size)
+
 # Create an instance of ActiveInferenceModel
-model = ActiveInferenceModel()
+model = ActiveInferenceModel(web, spider)
 
 # Create the agent
 my_agent = model.create_agent()
 
 # Initialize the environment
 env = Environment(grid_size=10)
-spider = Spider(start_position=(5, 5))
-web = Web(center=(5, 5))
-web.initialize_web_layout(grid_size)
 env.add_spider(spider)
 env.add_web(web)
 
+# Create the figure
+plt.figure()
+
+# Initialize a variable to keep track of whether the spider has just spun a web
+just_spun_web = False
+
 for t in range(50):
+    # Clear the figure for the next iteration
+    plt.clf()
+
     # The agent makes an observation of the environment
     observation = env.observe()
-    # Print the type of the observation for debugging
-    print(f"Type of observation: {type(observation)}")
-
-    # # Convert the observation to a 2D array with shape (num_modalities, num_states)
-    # num_states = [10, 10, 2]  # Replace this with the actual number of states for each modality
-    # observation_array = np.zeros((len(observation), max(num_states)))
-    # for i, obs in enumerate(observation):
-    #     observation_array[i, obs] = 1
-
-    # # Convert the observation_array to an integer array
-    # observation_array = observation_array.astype(int)
-
-    # Pass the converted observation to the infer_states method
-    qs = my_agent.infer_states(observation)
+    print(f"Observation: {observation}")
 
     # The agent infers the optimal policy and samples an action from this policy
+    qs = my_agent.infer_states(observation)
     q_pi, _ = my_agent.infer_policies()
     action = my_agent.sample_action()
 
+    # Update the spider's position
+    model.update_spider_position(action)
+
+    # Update the preferences
+    model.C = model.create_C(num_states)
+
     # The agent performs the action, which updates the state of the environment
     env.update_state(action)
+    # print(f"Spider's trace: {env.spiders[0].trace}")
 
     # Visualize the environment
     env.visualize()
 
-    # Pause for a short period of time and then clear the figure
-    plt.pause(0.1)
-    plt.clf()
+    # Pause for a longer period of time to slow down the plot updates
+    plt.pause(0.5)
