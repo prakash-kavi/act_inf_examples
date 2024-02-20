@@ -11,6 +11,7 @@ from pymdp.maths import softmax
 
 global grid_size
 
+#Spider class
 class Spider:  
     def __init__(self, start_position, web_state=0):
         self.position = start_position  # The spider's current position
