@@ -30,6 +30,11 @@ class Spider:
     def move(self, action, web):
         x_action, y_action, web_action = action
 
+        # Add randomness to the action state
+        x_action = np.random.choice([0, 1, 2])
+        y_action = np.random.choice([0, 1, 2])
+        web_action = np.random.choice([0, 1])
+
         new_position = list(self.position)
         if x_action == 0 and self.position[1] > 0:  # Move left
             new_position[1] -= 1
@@ -69,11 +74,20 @@ class Web:
 
             self.cells = list(set(self.cells))  # Remove duplicates
 
-    def update_state(self, new_cell, grid_size):
-        # Check if the new cell is within the grid boundaries
-        if 0 <= new_cell[0] < grid_size and 0 <= new_cell[1] < grid_size:
-            self.cells.append(new_cell)             # Add the new cell to the web
-            self.cells = list(set(self.cells))      # Remove duplicates
+    def update_state(self, action):
+        # Validate the action
+        if not self.is_valid_action(action):
+            raise ValueError("Invalid action")
+
+        # Add randomness to the action state
+        action = (np.random.choice([0, 1, 2]), np.random.choice([0, 1, 2]), np.random.choice([0, 1]))
+
+        # Move the spider based on the action
+        self.spiders[0].move(action, self.webs[0])
+
+        # Update the spider's web state based on its position
+        if self.spiders[0].position in self.webs[0].cells:
+            self.spiders[0].web_state = 1  # Set web state to 1 if spider is on a cell that is part of the web
 
 class Environment:
     def __init__(self, grid_size):
@@ -297,7 +311,7 @@ plt.figure()
 # Initialize a variable to keep track of whether the spider has just spun a web
 just_spun_web = False
 
-for t in range(50):
+for t in range(20):
     # Clear the figure for the next iteration
     plt.clf()
 
